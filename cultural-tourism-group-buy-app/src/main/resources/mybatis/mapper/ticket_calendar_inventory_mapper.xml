@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.wzj.infrastructure.dao.ITicketCalendarInventoryDao">
+    <select id="queryInventory" resultType="com.wzj.infrastructure.dao.po.TicketCalendarInventory">
+        select id, activity_id as activityId, goods_id as goodsId,
+               travel_date as travelDate, available_stock as availableStock
+        from ticket_calendar_inventory
+        where activity_id = #{activityId}
+          and goods_id = #{goodsId}
+          and travel_date = #{travelDate}
+          and status = 1
+        limit 1
+    </select>
+</mapper>

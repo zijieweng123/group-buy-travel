@@ -1,0 +1,12 @@
+package com.wzj.types.design.framework.link.model1;
+
+/**
+ * @author wzj
+ * @date 2026-01-21 16:51
+ * @description 略规则责任链接口
+ */
+public interface ILogicLink<T, D, R> extends ILogicChainArmory<T, D, R> {
+
+    R apply(T requestParameter, D dynamicContext) throws Exception;
+
+}

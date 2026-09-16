@@ -1,0 +1,5 @@
+spring:
+  config:
+    name: cultural-tourism-group-buy-app
+  profiles:
+    active: dev
