@@ -37,6 +37,8 @@ public class TeamStockOccupyRuleFilter implements ILogicHandler<TradeLockRuleCom
         if (StringUtils.isBlank(teamId)) {
             return TradeLockRuleFilterBackEntity.builder()
                     .userTakeOrderCount(dynamicContext.getUserTakeOrderCount())
+                    .requestLockKey(dynamicContext.getAcquiredRequestLockKey())
+                    .calendarStockKey(dynamicContext.getOccupiedCalendarStockKey())
                     .build();
         }
 
@@ -56,8 +58,12 @@ public class TeamStockOccupyRuleFilter implements ILogicHandler<TradeLockRuleCom
             throw new AppException(ResponseCode.E0008);
         }
 
+        dynamicContext.setOccupiedRecoveryTeamStockKey(recoveryTeamStockKey);
+
         return TradeLockRuleFilterBackEntity.builder()
                 .userTakeOrderCount(dynamicContext.getUserTakeOrderCount())
+                .requestLockKey(dynamicContext.getAcquiredRequestLockKey())
+                .calendarStockKey(dynamicContext.getOccupiedCalendarStockKey())
                 .recoveryTeamStockKey(recoveryTeamStockKey)
                 .build();
     }

@@ -74,6 +74,7 @@ public class GroupBuyActivityDiscountVO {
      * 包含 "1" → 不可见（visible=false）
      */
     public boolean isVisible() {
+        if (StringUtils.isBlank(tagScope)) return true;
         // 1. 切割字符串
         String[] split = this.tagScope.split(Constants.SPLIT);
 
@@ -91,6 +92,7 @@ public class GroupBuyActivityDiscountVO {
      * 包含 "2" → 不可参与（enable=false）
      */
     public boolean isEnable() {
+        if (StringUtils.isBlank(tagScope)) return true;
         // 1. 切割字符串
         String[] split = this.tagScope.split(Constants.SPLIT);
 

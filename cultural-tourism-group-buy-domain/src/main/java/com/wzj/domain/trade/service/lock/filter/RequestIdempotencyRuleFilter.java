@@ -27,13 +27,7 @@ public class RequestIdempotencyRuleFilter implements ILogicHandler<TradeLockRule
         if (!repository.acquireRequestLock(key, context.getGroupBuyActivity().getValidTime())) {
             throw new AppException(ResponseCode.E0109);
         }
-        try {
-            TradeLockRuleFilterBackEntity result = next(request, context);
-            result.setRequestLockKey(key);
-            return result;
-        } catch (Exception e) {
-            repository.releaseRequestLock(key);
-            throw e;
-        }
+        context.setAcquiredRequestLockKey(key);
+        return next(request, context);
     }
 }

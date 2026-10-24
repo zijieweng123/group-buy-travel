@@ -66,6 +66,11 @@ public class TradeLockRuleFilterFactory {
 
         private Integer UserTakeOrderCount;
 
+        // Record only successfully acquired resources for request-local compensation.
+        private String acquiredRequestLockKey;
+        private String occupiedCalendarStockKey;
+        private String occupiedRecoveryTeamStockKey;
+
         public String generateTeamStockKey(String teamId) {
             if (StringUtils.isBlank(teamId)) return null;
             return teamStockKey + groupBuyActivity.getActivityId() + "_" + teamId;

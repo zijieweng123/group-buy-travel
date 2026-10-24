@@ -33,7 +33,7 @@ public class TradeSettlementOrderService implements ITradeSettlementOrderService
     private ITradeRepository repository;
     @Resource
     private ITradePort port;
-    @Resource
+    @Resource(name = "notifyThreadPoolExecutor")
     private ThreadPoolExecutor threadPoolExecutor;
 
     @Resource

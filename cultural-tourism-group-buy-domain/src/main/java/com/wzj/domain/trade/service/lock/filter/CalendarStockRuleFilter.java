@@ -23,13 +23,7 @@ public class CalendarStockRuleFilter implements ILogicHandler<TradeLockRuleComma
         if (!repository.occupyCalendarStock(key, request.getActivityId(), request.getGoodsId(), request.getTravelDate())) {
             throw new AppException(ResponseCode.E0108);
         }
-        try {
-            TradeLockRuleFilterBackEntity result = next(request, context);
-            result.setCalendarStockKey(key);
-            return result;
-        } catch (Exception e) {
-            repository.recoveryCalendarStock(key);
-            throw e;
-        }
+        context.setOccupiedCalendarStockKey(key);
+        return next(request, context);
     }
 }

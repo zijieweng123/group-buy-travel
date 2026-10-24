@@ -28,7 +28,7 @@ public class ActivityRepository extends AbstractRepository implements IActivityR
     @Resource
     private IGroupBuyDiscountDao groupBuyDiscountDao;
     @Resource
-    private ISkuDao skuDao;
+    private SkuCatalogCache skuCatalogCache;
     @Resource
     private IScSkuActivityDao scSkuActivityDao;
     @Resource
@@ -82,13 +82,7 @@ public class ActivityRepository extends AbstractRepository implements IActivityR
 
     @Override
     public SkuVO querySkuByGoodsId(String goodsId) {
-        Sku sku = skuDao.querySkuByGoodsId(goodsId);
-        if (null == sku) return null;
-        return SkuVO.builder()
-                .goodsId(sku.getGoodsId())
-                .goodsName(sku.getGoodsName())
-                .originalPrice(sku.getOriginalPrice())
-                .build();
+        return skuCatalogCache.query(goodsId, dccService.isCacheOpenSwitch());
     }
 
     /**

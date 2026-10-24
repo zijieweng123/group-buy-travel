@@ -18,7 +18,7 @@ thread:
         core-pool-size: 20
         max-pool-size: 50
         keep-alive-time: 5000
-        block-queue-size: 5000
+        block-queue-size: 128
         policy: CallerRunsPolicy
 
 # 数据库配置；启动时配置数据库资源信息

@@ -16,6 +16,7 @@ import com.wzj.types.enums.ResponseCode;
 import com.wzj.types.exception.AppException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -35,6 +36,9 @@ public class MarketNode extends AbstractGroupBuyMarketSupport<MarketProductEntit
     @Resource
     private ThreadPoolExecutor threadPoolExecutor;
 
+    @Value("${trade.market-query-timeout-ms:3000}")
+    private long queryTimeoutMillis = 3000;
+
     /**
      * <a href="https://bugstack.cn/md/road-map/spring-dependency-injection.html">Spring 注入详细说明</a>
      */
@@ -52,16 +56,25 @@ public class MarketNode extends AbstractGroupBuyMarketSupport<MarketProductEntit
         // 异步查询活动配置
         QueryGroupBuyActivityDiscountVOThreadTask queryGroupBuyActivityDiscountVOThreadTask = new QueryGroupBuyActivityDiscountVOThreadTask(requestParameter.getSource(), requestParameter.getChannel(), requestParameter.getGoodsId(), repository);
         FutureTask<GroupBuyActivityDiscountVO> groupBuyActivityDiscountVOFutureTask = new FutureTask<>(queryGroupBuyActivityDiscountVOThreadTask);
-        threadPoolExecutor.execute(groupBuyActivityDiscountVOFutureTask);
-
-        // 异步查询商品信息 - 在实际生产中，商品有同步库或者调用接口查询。这里暂时使用DB方式查询。
-        QuerySkuVOFromDBThreadTask querySkuVOFromDBThreadTask = new QuerySkuVOFromDBThreadTask(requestParameter.getGoodsId(), repository);
+        QuerySkuVOFromDBThreadTask querySkuVOFromDBThreadTask =
+                new QuerySkuVOFromDBThreadTask(requestParameter.getGoodsId(), repository);
         FutureTask<SkuVO> skuVOFutureTask = new FutureTask<>(querySkuVOFromDBThreadTask);
-        threadPoolExecutor.execute(skuVOFutureTask);
-
-        // 写入上下文 - 对于一些复杂场景，获取数据的操作，有时候会在下N个节点获取，这样前置查询数据，可以提高接口响应效率
-        dynamicContext.setGroupBuyActivityDiscountVO(groupBuyActivityDiscountVOFutureTask.get(timeout, TimeUnit.MINUTES));
-        dynamicContext.setSkuVO(skuVOFutureTask.get(timeout, TimeUnit.MINUTES));
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(queryTimeoutMillis);
+        try {
+            threadPoolExecutor.execute(groupBuyActivityDiscountVOFutureTask);
+            threadPoolExecutor.execute(skuVOFutureTask);
+            dynamicContext.setGroupBuyActivityDiscountVO(groupBuyActivityDiscountVOFutureTask.get(
+                    Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS));
+            dynamicContext.setSkuVO(skuVOFutureTask.get(
+                    Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        } finally {
+            // Timeout or a failed sibling must not leave queued work behind.
+            if (!groupBuyActivityDiscountVOFutureTask.isDone()) groupBuyActivityDiscountVOFutureTask.cancel(true);
+            if (!skuVOFutureTask.isDone()) skuVOFutureTask.cancel(true);
+        }
 
         log.info("拼团商品查询试算服务-MarketNode userId:{} 异步线程加载数据「GroupBuyActivityDiscountVO、SkuVO」完成", requestParameter.getUserId());
     }
