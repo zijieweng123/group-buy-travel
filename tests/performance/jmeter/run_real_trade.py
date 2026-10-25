@@ -220,6 +220,14 @@ def write_report(report, directory):
     (directory/'REPORT.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
 
+def merge_application_options(base, overrides):
+    """Replace defaults; Spring combines duplicate CLI values (e.g. '20,50') instead of overriding."""
+    keys=[str(value).split('=',1)[0] for value in overrides]
+    assert all(str(value).startswith('--') and '=' in str(value) for value in overrides)
+    assert len(keys)==len(set(keys)), 'Duplicate application overrides'
+    return [value for value in base if str(value).split('=',1)[0] not in keys]+list(overrides)
+
+
 def start_app(directory, jar=None):
     global app
     with socket.socket() as check:
@@ -238,7 +246,7 @@ def start_app(directory, jar=None):
             '--spring.kafka.topics.team-refund=travel.loadtest.team-refund',
             '--server.tomcat.max-connections=200', '--server.tomcat.threads.max=20',
             '--server.tomcat.accept-count=100', '--logging.level.root=WARN', '--logging.config=' + (HERE/'logback-loadtest.xml').as_uri()]
-    args.extend(APP_EXTRA_ARGUMENTS)
+    args = merge_application_options(args, APP_EXTRA_ARGUMENTS)
     log = (directory/'application.log').open('w', encoding='utf-8')
     app = subprocess.Popen(list(map(str, args)), cwd=directory, stdout=log, stderr=subprocess.STDOUT, creationflags=FLAGS)
     (directory/'application-arguments.json').write_text(json.dumps(list(map(str,args)),indent=2),encoding='utf-8')

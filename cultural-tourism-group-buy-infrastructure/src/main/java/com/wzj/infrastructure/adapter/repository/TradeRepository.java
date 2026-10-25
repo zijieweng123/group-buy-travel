@@ -6,6 +6,7 @@ import com.wzj.domain.trade.model.aggregate.GroupBuyOrderAggregate;
 import com.wzj.domain.trade.model.aggregate.GroupBuyTeamSettlementAggregate;
 import com.wzj.domain.trade.model.entity.*;
 import com.wzj.domain.trade.model.valobj.GroupBuyProgressVO;
+import com.wzj.domain.trade.model.valobj.InventoryReservationResult;
 import com.wzj.domain.trade.model.valobj.NotifyConfigVO;
 import com.wzj.domain.trade.model.valobj.NotifyTypeEnumVO;
 import com.wzj.domain.trade.model.valobj.TradeOrderStatusEnumVO;
@@ -18,6 +19,8 @@ import com.wzj.infrastructure.dao.po.GroupBuyActivity;
 import com.wzj.infrastructure.dao.po.GroupBuyOrder;
 import com.wzj.infrastructure.dao.po.GroupBuyOrderList;
 import com.wzj.infrastructure.dao.po.NotifyTask;
+import com.wzj.infrastructure.dao.po.TradeLockPrecheck;
+import com.wzj.infrastructure.dao.po.TradeSettlementRead;
 import com.wzj.infrastructure.dcc.DCCService;
 import com.wzj.infrastructure.redis.IRedisService;
 import com.wzj.types.common.Constants;
@@ -31,7 +34,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.util.*;
@@ -62,6 +64,15 @@ public class TradeRepository implements ITradeRepository {
     @Resource
     private ITicketCalendarInventoryDao ticketCalendarInventoryDao;
 
+    @Resource
+    private TradeTransactions transactions;
+
+    @Value("${trade.inventory.reservation.enabled:false}")
+    private boolean atomicReservationEnabled;
+
+    @Value("${trade.read-snapshots.enabled:false}")
+    private boolean readSnapshotsEnabled;
+
     @Value("${spring.kafka.topics.team-success}")
     private String topic_team_success;
 
@@ -84,6 +95,27 @@ public class TradeRepository implements ITradeRepository {
     }
 
     @Override
+    public TradeLockPrecheckEntity queryLockPrecheck(TradeLockRuleCommandEntity request) {
+        if (!readSnapshotsEnabled) return null;
+        TradeLockPrecheck row = groupBuyActivityDao.queryLockPrecheck(request);
+        return row == null ? new TradeLockPrecheckEntity() : TradeLockPrecheckEntity.builder()
+                .activity(activityEntity(row)).userOrderCount(row.getUserOrderCount())
+                .availableStock(row.getAvailableStock()).build();
+    }
+
+    @Override
+    public TradeSettlementSnapshotEntity querySettlementSnapshot(String userId, String outTradeNo) {
+        if (!readSnapshotsEnabled) return null;
+        TradeSettlementRead row = groupBuyOrderDao.querySettlementSnapshot(userId, outTradeNo);
+        if (row == null) return new TradeSettlementSnapshotEntity();
+        MarketPayOrderEntity order = MarketPayOrderEntity.builder().teamId(row.getOrderTeamId())
+                .orderId(row.getOrderId()).originalPrice(row.getOrderOriginalPrice())
+                .deductionPrice(row.getOrderDeductionPrice()).payPrice(row.getOrderPayPrice())
+                .tradeOrderStatusEnumVO(TradeOrderStatusEnumVO.valueOf(row.getOrderStatus())).build();
+        return new TradeSettlementSnapshotEntity(order, teamEntity(row));
+    }
+
+    @Override
     public GroupBuyProgressVO queryGroupBuyProgress(String teamId) {
         GroupBuyOrder groupBuyOrder = groupBuyOrderDao.queryGroupBuyProgress(teamId);
         if (null == groupBuyOrder) return null;
@@ -94,9 +126,12 @@ public class TradeRepository implements ITradeRepository {
                 .build();
     }
 
-    @Transactional(timeout = 500)
     @Override
     public MarketPayOrderEntity lockMarketPayOrder(GroupBuyOrderAggregate groupBuyOrderAggregate) {
+        return transactions.execute(TradeTransactions.Operation.LOCK, () -> doLockMarketPayOrder(groupBuyOrderAggregate));
+    }
+
+    private MarketPayOrderEntity doLockMarketPayOrder(GroupBuyOrderAggregate groupBuyOrderAggregate) {
 
         // 聚合对象信息
         UserEntity userEntity = groupBuyOrderAggregate.getUserEntity();
@@ -191,6 +226,11 @@ public class TradeRepository implements ITradeRepository {
 
         GroupBuyActivity groupBuyActivity = groupBuyActivityDao.queryGroupBuyActivityByActivityId(activityId);
 
+        return activityEntity(groupBuyActivity);
+    }
+
+    private GroupBuyActivityEntity activityEntity(GroupBuyActivity groupBuyActivity) {
+        if (groupBuyActivity == null) return null;
         return GroupBuyActivityEntity.builder()
                 .activityId(groupBuyActivity.getActivityId())
                 .activityName(groupBuyActivity.getActivityName())
@@ -220,6 +260,11 @@ public class TradeRepository implements ITradeRepository {
     @Override
     public GroupBuyTeamEntity queryGroupBuyTeamByTeamId(String teamId) {
         GroupBuyOrder groupBuyOrder = groupBuyOrderDao.queryGroupBuyTeamByTeamId(teamId);
+        return teamEntity(groupBuyOrder);
+    }
+
+    private GroupBuyTeamEntity teamEntity(GroupBuyOrder groupBuyOrder) {
+        if (groupBuyOrder == null || groupBuyOrder.getTeamId() == null) return null;
         return GroupBuyTeamEntity.builder()
                 .teamId(groupBuyOrder.getTeamId())
                 .activityId(groupBuyOrder.getActivityId())
@@ -238,9 +283,12 @@ public class TradeRepository implements ITradeRepository {
                 .build();
     }
 
-    @Transactional(timeout = 500)
     @Override
     public NotifyTaskEntity settlementMarketPayOrder(GroupBuyTeamSettlementAggregate groupBuyTeamSettlementAggregate) {
+        return transactions.execute(TradeTransactions.Operation.SETTLEMENT, () -> doSettlementMarketPayOrder(groupBuyTeamSettlementAggregate));
+    }
+
+    private NotifyTaskEntity doSettlementMarketPayOrder(GroupBuyTeamSettlementAggregate groupBuyTeamSettlementAggregate) {
 
         UserEntity userEntity = groupBuyTeamSettlementAggregate.getUserEntity();
         GroupBuyTeamEntity groupBuyTeamEntity = groupBuyTeamSettlementAggregate.getGroupBuyTeamEntity();
@@ -405,6 +453,18 @@ public class TradeRepository implements ITradeRepository {
     }
 
     @Override
+    public InventoryReservationResult reserveRequestAndCalendar(String requestKey, String calendarKey, Integer capacity, Integer validTime) {
+        if (!atomicReservationEnabled) return InventoryReservationResult.DISABLED;
+        long leaseMillis = TimeUnit.MINUTES.toMillis(Math.max(validTime, 1));
+        long result = redisService.reserveRequestAndCalendar(requestKey, calendarKey,
+                capacity == null ? -1 : capacity, leaseMillis, UUID.randomUUID().toString());
+        if (result == 1) return InventoryReservationResult.ACQUIRED;
+        if (result == 0) return InventoryReservationResult.DUPLICATE;
+        if (result == -1) return InventoryReservationResult.EXHAUSTED;
+        throw new IllegalStateException("Unknown inventory reservation result");
+    }
+
+    @Override
     public boolean acquireRequestLock(String requestLockKey, Integer validTime) {
         return redisService.setNx(requestLockKey, Math.max(validTime, 1), TimeUnit.MINUTES);
     }
@@ -418,9 +478,14 @@ public class TradeRepository implements ITradeRepository {
     public boolean occupyCalendarStock(String calendarStockKey, Long activityId, String goodsId, LocalDate travelDate) {
         com.wzj.infrastructure.dao.po.TicketCalendarInventory inventory =
                 ticketCalendarInventoryDao.queryInventory(activityId, goodsId, travelDate);
-        if (inventory == null || inventory.getAvailableStock() == null || inventory.getAvailableStock() <= 0) return false;
+        return occupyCalendarStock(calendarStockKey, inventory == null ? null : inventory.getAvailableStock());
+    }
+
+    @Override
+    public boolean occupyCalendarStock(String calendarStockKey, Integer availableStock) {
+        if (availableStock == null || availableStock <= 0) return false;
         long occupied = redisService.incr(calendarStockKey);
-        if (occupied > inventory.getAvailableStock()) {
+        if (occupied > availableStock) {
             redisService.decr(calendarStockKey);
             return false;
         }

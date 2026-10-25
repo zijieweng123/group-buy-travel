@@ -2,6 +2,7 @@ package com.wzj.domain.trade.service.lock.filter;
 
 import com.wzj.domain.trade.adapter.repository.ITradeRepository;
 import com.wzj.domain.trade.model.entity.GroupBuyActivityEntity;
+import com.wzj.domain.trade.model.entity.TradeLockPrecheckEntity;
 import com.wzj.domain.trade.model.entity.TradeLockRuleCommandEntity;
 import com.wzj.domain.trade.model.entity.TradeLockRuleFilterBackEntity;
 import com.wzj.domain.trade.service.lock.factory.TradeLockRuleFilterFactory;
@@ -32,10 +33,13 @@ public class ActivityUsabilityRuleFilter implements ILogicHandler<TradeLockRuleC
         log.info("交易规则过滤-活动的可用性校验{} activityId:{}", requestParameter.getUserId(), requestParameter.getActivityId());
 
         // 查询拼团活动
-        GroupBuyActivityEntity groupBuyActivity = repository.queryGroupBuyActivityEntityByActivityId(requestParameter.getActivityId());
+        TradeLockPrecheckEntity precheck = repository.queryLockPrecheck(requestParameter);
+        dynamicContext.setPrecheck(precheck);
+        GroupBuyActivityEntity groupBuyActivity = precheck == null
+                ? repository.queryGroupBuyActivityEntityByActivityId(requestParameter.getActivityId()) : precheck.getActivity();
 
         // 校验；活动状态 - 可以抛业务异常code，或者把code写入到动态上下文dynamicContext中，最后获取。
-        if (!ActivityStatusEnumVO.EFFECTIVE.equals(groupBuyActivity.getStatus())) {
+        if (groupBuyActivity == null || !ActivityStatusEnumVO.EFFECTIVE.equals(groupBuyActivity.getStatus())) {
             log.info("活动的可用性校验，非生效状态 activityId:{}", requestParameter.getActivityId());
             throw new AppException(ResponseCode.E0101);
         }

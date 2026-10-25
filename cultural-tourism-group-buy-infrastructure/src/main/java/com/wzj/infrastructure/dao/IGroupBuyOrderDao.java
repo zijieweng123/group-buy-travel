@@ -2,6 +2,8 @@ package com.wzj.infrastructure.dao;
 
 import com.wzj.infrastructure.dao.po.GroupBuyOrder;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import com.wzj.infrastructure.dao.po.TradeSettlementRead;
 
 import java.util.List;
 import java.util.Set;
@@ -13,6 +15,8 @@ import java.util.Set;
  */
 @Mapper
 public interface IGroupBuyOrderDao {
+
+    TradeSettlementRead querySettlementSnapshot(@Param("userId") String userId, @Param("outTradeNo") String outTradeNo);
 
     void insert(GroupBuyOrder groupBuyOrder);
 

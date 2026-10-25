@@ -1,3 +1,6 @@
+// Optional diagnostic header, one fixed-size value correlated with this HTTP sample.
+String timing = prev.getResponseHeaders().readLines().find { it.toLowerCase(java.util.Locale.ROOT).startsWith('server-timing:') }
+vars.put('serverTiming', timing ? timing.substring(timing.indexOf(':')+1).trim().replace(',', '|') : '')
 import groovy.json.JsonSlurper
 try {
     if (prev.getResponseCode() != '200') throw new IllegalStateException('HTTP ' + prev.getResponseCode())

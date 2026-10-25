@@ -1,6 +1,7 @@
 package com.wzj.domain.trade.service.lock.factory;
 
 import com.wzj.domain.trade.model.entity.GroupBuyActivityEntity;
+import com.wzj.domain.trade.model.entity.TradeLockPrecheckEntity;
 import com.wzj.domain.trade.model.entity.TradeLockRuleCommandEntity;
 import com.wzj.domain.trade.model.entity.TradeLockRuleFilterBackEntity;
 import com.wzj.domain.trade.service.lock.filter.ActivityUsabilityRuleFilter;
@@ -63,6 +64,7 @@ public class TradeLockRuleFilterFactory {
         private String requestLockKey = "travel:order:idempotent:";
 
         private GroupBuyActivityEntity groupBuyActivity;
+        private TradeLockPrecheckEntity precheck;
 
         private Integer UserTakeOrderCount;
 

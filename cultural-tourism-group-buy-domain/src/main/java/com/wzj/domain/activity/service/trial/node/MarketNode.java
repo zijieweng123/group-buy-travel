@@ -1,5 +1,6 @@
 package com.wzj.domain.activity.service.trial.node;
 
+import com.wzj.types.observability.TradeRequestTiming;
 import com.alibaba.fastjson.JSON;
 import com.wzj.domain.activity.model.entity.MarketProductEntity;
 import com.wzj.domain.activity.model.entity.TrialBalanceEntity;
@@ -55,10 +56,10 @@ public class MarketNode extends AbstractGroupBuyMarketSupport<MarketProductEntit
     protected void multiThread(MarketProductEntity requestParameter, DefaultActivityStrategyFactory.DynamicContext dynamicContext) throws ExecutionException, InterruptedException, TimeoutException {
         // 异步查询活动配置
         QueryGroupBuyActivityDiscountVOThreadTask queryGroupBuyActivityDiscountVOThreadTask = new QueryGroupBuyActivityDiscountVOThreadTask(requestParameter.getSource(), requestParameter.getChannel(), requestParameter.getGoodsId(), repository);
-        FutureTask<GroupBuyActivityDiscountVO> groupBuyActivityDiscountVOFutureTask = new FutureTask<>(queryGroupBuyActivityDiscountVOThreadTask);
+        FutureTask<GroupBuyActivityDiscountVO> groupBuyActivityDiscountVOFutureTask = new FutureTask<>(TradeRequestTiming.marketTask(queryGroupBuyActivityDiscountVOThreadTask));
         QuerySkuVOFromDBThreadTask querySkuVOFromDBThreadTask =
                 new QuerySkuVOFromDBThreadTask(requestParameter.getGoodsId(), repository);
-        FutureTask<SkuVO> skuVOFutureTask = new FutureTask<>(querySkuVOFromDBThreadTask);
+        FutureTask<SkuVO> skuVOFutureTask = new FutureTask<>(TradeRequestTiming.marketTask(querySkuVOFromDBThreadTask));
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(queryTimeoutMillis);
         try {
             threadPoolExecutor.execute(groupBuyActivityDiscountVOFutureTask);
@@ -83,7 +84,9 @@ public class MarketNode extends AbstractGroupBuyMarketSupport<MarketProductEntit
 
     @Override
     public TrialBalanceEntity doApply(MarketProductEntity requestParameter, DefaultActivityStrategyFactory.DynamicContext dynamicContext) throws Exception {
-        log.info("拼团商品查询试算服务-MarketNode userId:{} requestParameter:{}", requestParameter.getUserId(), JSON.toJSONString(requestParameter));
+        if (log.isInfoEnabled()) {
+            log.info("拼团商品查询试算服务-MarketNode userId:{} requestParameter:{}", requestParameter.getUserId(), JSON.toJSONString(requestParameter));
+        }
 
         // 从上下文中获取折扣配置
         GroupBuyActivityDiscountVO groupBuyActivityDiscountVO = dynamicContext.getGroupBuyActivityDiscountVO();

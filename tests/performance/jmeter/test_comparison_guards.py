@@ -1,5 +1,7 @@
 """Preparation safety tests; no live Docker, database or business HTTP."""
 import re
+import tempfile
+import compare_notify_batch
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +25,21 @@ class ComparisonGuardTest(unittest.TestCase):
         self.assertTrue(targets)
         self.assertEqual({"cultural_tourism_group_buy_compare"}, set(targets))
         self.assertIsNone(re.search(r"\bDROP\s+DATABASE\b", text, re.I))
+
+    def test_batch_comparison_uses_identical_build_and_indexes(self):
+        with tempfile.TemporaryDirectory(dir=compare.rt.HERE/'results') as directory:
+            manifest=compare_notify_batch.prepare(Path(directory))
+            self.assertEqual(manifest['baselineJar'],manifest['optimizedJar'])
+            self.assertEqual(manifest['baselineSha256'],manifest['optimizedSha256'])
+            self.assertTrue(manifest['indexesForBoth'])
+            self.assertEqual({'baseline':['--trade.notify.batch.enabled=false'],
+                              'optimized':['--trade.notify.batch.enabled=true']},manifest['versionArguments'])
+
+    def test_each_phase_recreates_calendar_inventory_in_comparison_namespace(self):
+        seed=compare.comparison_seed()
+        self.assertIn('DROP TABLE IF EXISTS ticket_calendar_inventory;',seed)
+        self.assertLess(seed.index('DROP TABLE IF EXISTS ticket_calendar_inventory;'),
+                        seed.index('CREATE TABLE IF NOT EXISTS ticket_calendar_inventory'))
 
     def test_low_memory_blocks_processes_before_run_setup(self):
         with patch.object(compare.rt, "require_memory", side_effect=RuntimeError("Insufficient memory")), \

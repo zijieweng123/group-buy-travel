@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 public interface IRedisService {
 
+    long reserveRequestAndCalendar(String requestKey, String calendarKey, long capacity, long leaseMillis, String invocationToken);
+
     /**
      * 设置指定 key 的值
      *

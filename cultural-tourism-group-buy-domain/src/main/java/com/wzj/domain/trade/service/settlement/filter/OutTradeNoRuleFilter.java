@@ -2,6 +2,7 @@ package com.wzj.domain.trade.service.settlement.filter;
 
 import com.wzj.domain.trade.adapter.repository.ITradeRepository;
 import com.wzj.domain.trade.model.entity.MarketPayOrderEntity;
+import com.wzj.domain.trade.model.entity.TradeSettlementSnapshotEntity;
 import com.wzj.domain.trade.model.entity.TradeSettlementRuleCommandEntity;
 import com.wzj.domain.trade.model.entity.TradeSettlementRuleFilterBackEntity;
 import com.wzj.domain.trade.service.settlement.factory.TradeSettlementRuleFilterFactory;
@@ -30,7 +31,13 @@ public class OutTradeNoRuleFilter implements ILogicHandler<TradeSettlementRuleCo
         log.info("结算规则过滤-外部单号校验{} outTradeNo:{}", requestParameter.getUserId(), requestParameter.getOutTradeNo());
 
         // 查询拼团信息
-        MarketPayOrderEntity marketPayOrderEntity = repository.queryMarketPayOrderEntityByOutTradeNo(requestParameter.getUserId(), requestParameter.getOutTradeNo());
+        TradeSettlementSnapshotEntity snapshot = repository.querySettlementSnapshot(requestParameter.getUserId(), requestParameter.getOutTradeNo());
+        MarketPayOrderEntity marketPayOrderEntity = snapshot == null
+                ? repository.queryMarketPayOrderEntityByOutTradeNo(requestParameter.getUserId(), requestParameter.getOutTradeNo()) : snapshot.getOrder();
+        if (snapshot != null) {
+            dynamicContext.setGroupBuyTeamEntity(snapshot.getTeam());
+            dynamicContext.setTeamSnapshotLoaded(true);
+        }
 
         if (null == marketPayOrderEntity) {
             log.error("不存在的外部交易单号或用户已退单，不需要做支付订单结算:{} outTradeNo:{}", requestParameter.getUserId(), requestParameter.getOutTradeNo());

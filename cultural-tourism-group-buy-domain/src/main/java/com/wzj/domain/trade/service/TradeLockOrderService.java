@@ -1,5 +1,7 @@
 package com.wzj.domain.trade.service;
 
+import com.wzj.types.observability.TradeRequestTiming;
+import com.wzj.types.observability.TradeRequestTiming.Stage;
 import com.wzj.domain.trade.adapter.repository.ITradeRepository;
 import com.wzj.domain.trade.model.aggregate.GroupBuyOrderAggregate;
 import com.wzj.domain.trade.model.entity.*;
@@ -29,13 +31,13 @@ public class TradeLockOrderService implements ITradeLockOrderService {
     @Override
     public MarketPayOrderEntity queryNoPayMarketPayOrderByOutTradeNo(String userId, String outTradeNo) {
         log.info("拼团交易-查询未支付营销订单:{} outTradeNo:{}", userId, outTradeNo);
-        return repository.queryMarketPayOrderEntityByOutTradeNo(userId, outTradeNo);
+        return TradeRequestTiming.call(Stage.LOOKUP, () -> repository.queryMarketPayOrderEntityByOutTradeNo(userId, outTradeNo));
     }
 
     @Override
     public GroupBuyProgressVO queryGroupBuyProgressVO(String teamId) {
         log.info("拼团交易-查询拼单进度:{}", teamId);
-        return repository.queryGroupBuyProgress(teamId);
+        return TradeRequestTiming.call(Stage.PROGRESS, () -> repository.queryGroupBuyProgress(teamId));
     }
 
     @Override
@@ -45,7 +47,7 @@ public class TradeLockOrderService implements ITradeLockOrderService {
         TradeLockRuleFilterFactory.DynamicContext context = new TradeLockRuleFilterFactory.DynamicContext();
         try {
             // The linked list advances iteratively. Filters store acquired keys in the context.
-            TradeLockRuleFilterBackEntity result = tradeRuleFilter.apply(TradeLockRuleCommandEntity.builder()
+            TradeLockRuleFilterBackEntity result = TradeRequestTiming.call(Stage.RULES, () -> tradeRuleFilter.apply(TradeLockRuleCommandEntity.builder()
                     .activityId(payActivityEntity.getActivityId())
                     .userId(userEntity.getUserId())
                     .teamId(payActivityEntity.getTeamId())
@@ -55,7 +57,7 @@ public class TradeLockOrderService implements ITradeLockOrderService {
                     .visitorName(payDiscountEntity.getVisitorName())
                     .visitorIdType(payDiscountEntity.getVisitorIdType())
                     .visitorIdNo(payDiscountEntity.getVisitorIdNo())
-                    .build(), context);
+                    .build(), context));
 
             GroupBuyOrderAggregate aggregate = GroupBuyOrderAggregate.builder()
                     .userEntity(userEntity)

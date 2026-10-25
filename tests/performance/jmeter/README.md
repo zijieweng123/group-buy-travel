@@ -104,3 +104,63 @@ python .\tests\performance\jmeter\run_real_trade.py --users 10 25 50 50 50 --dur
 - 吞吐及百分位剔除预热；最终数据库核验包含预热。
 - CPU/内存采样覆盖 JMeter 生命周期，包含启动与预热，不等同于纯测量窗口。
 - 本轮建立真实交易基线，不自动产生优化前后提升比例；此前助手对话链路的 73.4% / 37.7% 不适用于此项目。
+
+
+## 第二轮：通知状态批量回写
+
+代码和真实对照结果见 [通知状态批量回写报告](NOTIFICATION-BATCH-2026-10-24.md)。批处理默认关闭，显式设置 `--trade.notify.batch.enabled=true` 可启用；当前本机尚未验证到整体性能提升。
+
+同一构建、相同索引，仅切换批处理开关的六轮 50 并发对照：
+
+    python tests/performance/jmeter/compare_notify_batch.py --prepare-only
+    python tests/performance/jmeter/compare_notify_batch.py --run
+
+两组均保持数据库持久性、连接池和 JVM 参数一致，额外核对通知成功状态保护及已发送未回写后的补偿恢复，并记录事务阶段和 MySQL 文件等待。原先的 `compare_real_trade.py` 仍用于归档的不同构建对照。
+
+
+## 第三轮：定位真实下单请求延迟
+
+逐请求耗时及优化依据见 [请求延迟诊断](REQUEST-LATENCY-2026-10-24.md)。
+诊断默认关闭，显式 `--trade.trace.enabled=true` 时，JMeter 将应用阶段、连接池取连接、JDBC、Redis 和事务提交耗时保存到对应 HTTP 请求的 JTL 行。
+
+```powershell
+# 原配置单轮诊断，50 并发、60 秒、前 15 秒预热
+python tests/performance/jmeter/compare_request_latency.py --diagnose-only
+# 优化配置单轮筛选
+python tests/performance/jmeter/compare_request_latency.py --optimized-pilot
+# 相同构建、索引和数据准备，ABBAAB 各三轮正式对照
+python tests/performance/jmeter/compare_request_latency.py
+```
+
+每次创建独立结果目录，保留构建和脚本 SHA256；最新索引为 `results/request-latency-latest.json`。
+默认关闭通知批处理；优化组合调整 HTTP/Hikari 容量并启用 Connector/J 本地会话状态，保持数据库持久性。
+`request-latency.json` 将慢请求逐条关联后统计均值；嵌套/并行阶段不直接相加，客户端减去应用时间也不能全部视为单一服务端队列。
+
+
+## 第四轮：争取 100+ 成功下单 QPS
+
+代码、真实预检和筛选结果见 [100 QPS 优化报告](QPS100-2026-10-24.md)。
+下单将活动/用户次数/日期库存合并读取，结算将订单/团队合并读取；可选 Redis Lua 将请求防重与日期库存预占合并为一次原子执行。
+当前请求内复用读取结果，不缓存动态库存或参与次数，订单仍同步提交后才返回成功。
+
+```powershell
+# 50 并发，固定 50 HTTP 工作线程 / 40 Hikari 连接，单轮筛选
+python tests/performance/jmeter/compare_trade_qps.py --pilot --atomic-reservation
+# 同构建、同容量，关闭/开启代码优化，各三轮 ABBAAB 正式对照
+python tests/performance/jmeter/compare_trade_qps.py --atomic-reservation
+```
+
+`--spring.profiles.active=dev,performance` 启用当前候选配置：合并读取、原子预占、50 个数据库连接、12 个通知线程和通知状态批量回写；诊断默认关闭，日志级别为 WARN。
+压测脚本显式覆盖两组功能开关并在起压前检查连接池实际容量。最新结果索引为 `results/qps100-latest.json`。
+原子脚本适用于当前独立 Redis，Cluster 部署需先保证相关 keys 位于同槽。
+
+
+当前组合的三轮持续验证命令（不据此计算与历史基线的提升比例）：
+
+```powershell
+python tests/performance/jmeter/compare_trade_qps.py --verify-optimized --atomic-reservation --pool-size 50 --notify-threads 12 --batch-notify
+```
+
+`--verify-optimized` 重复当前优化组三轮；省略该参数会进行 ABBAAB 各三轮对照。
+预编译缓存 `--prepared-statements` 为独立实验选项，当前候选配置保持关闭。
+通知状态批量回写只合并 broker ACK 后的状态更新，订单和结算事务仍同步提交。

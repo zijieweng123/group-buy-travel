@@ -2,6 +2,13 @@ package com.wzj.infrastructure.redis;
 
 import org.redisson.api.*;
 import org.springframework.stereotype.Service;
+import org.redisson.client.codec.StringCodec;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.StreamUtils;
+import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
 
 import javax.annotation.Resource;
 import java.time.Duration;
@@ -17,6 +24,21 @@ public class RedissonService implements IRedisService {
 
     @Resource
     private RedissonClient redissonClient;
+
+    private static final String RESERVE_SCRIPT = loadReservationScript();
+    private static String loadReservationScript() {
+        try (InputStream input = new ClassPathResource("redis/reserve-request-calendar.lua").getInputStream()) {
+            return StreamUtils.copyToString(input, StandardCharsets.UTF_8);
+        } catch (IOException failure) { throw new IllegalStateException("Missing inventory reservation script", failure); }
+    }
+
+    @Override
+    public long reserveRequestAndCalendar(String requestKey, String calendarKey, long capacity, long leaseMillis, String invocationToken) {
+        Long result = redissonClient.getScript(StringCodec.INSTANCE).eval(RScript.Mode.READ_WRITE,
+                RESERVE_SCRIPT, RScript.ReturnType.INTEGER, Arrays.<Object>asList(requestKey, calendarKey),
+                Long.toString(capacity), Long.toString(leaseMillis), invocationToken);
+        return result;
+    }
 
     public <T> void setValue(String key, T value) {
         redissonClient.<T>getBucket(key).set(value);

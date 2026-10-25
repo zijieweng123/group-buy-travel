@@ -29,7 +29,9 @@ public class SwitchNode extends AbstractGroupBuyMarketSupport<MarketProductEntit
 
     @Override
     public TrialBalanceEntity doApply(MarketProductEntity requestParameter, DefaultActivityStrategyFactory.DynamicContext dynamicContext) throws Exception {
-        log.info("拼团商品查询试算服务-SwitchNode userId:{} requestParameter:{}", requestParameter.getUserId(), JSON.toJSONString(requestParameter));
+        if (log.isInfoEnabled()) {
+            log.info("拼团商品查询试算服务-SwitchNode userId:{} requestParameter:{}", requestParameter.getUserId(), JSON.toJSONString(requestParameter));
+        }
 
         // 根据用户ID切量
         String userId = requestParameter.getUserId();

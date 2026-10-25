@@ -35,7 +35,9 @@ public class SettableRuleFilter implements ILogicHandler<TradeSettlementRuleComm
         MarketPayOrderEntity marketPayOrderEntity = dynamicContext.getMarketPayOrderEntity();
 
         // 查询拼团对象
-        GroupBuyTeamEntity groupBuyTeamEntity = repository.queryGroupBuyTeamByTeamId(marketPayOrderEntity.getTeamId());
+        GroupBuyTeamEntity groupBuyTeamEntity = dynamicContext.isTeamSnapshotLoaded()
+                ? dynamicContext.getGroupBuyTeamEntity() : repository.queryGroupBuyTeamByTeamId(marketPayOrderEntity.getTeamId());
+        if (groupBuyTeamEntity == null) throw new AppException(ResponseCode.E0104);
 
         // 外部交易时间 - 也就是用户支付完成的时间，这个时间要在拼团有效时间范围内
         Date outTradeTime = requestParameter.getOutTradeTime();

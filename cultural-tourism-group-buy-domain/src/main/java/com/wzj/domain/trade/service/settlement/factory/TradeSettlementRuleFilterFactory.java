@@ -52,5 +52,6 @@ public class TradeSettlementRuleFilterFactory {
         private MarketPayOrderEntity marketPayOrderEntity;
         // 拼团组队实体对象
         private GroupBuyTeamEntity groupBuyTeamEntity;
+        private boolean teamSnapshotLoaded;
     }
 }

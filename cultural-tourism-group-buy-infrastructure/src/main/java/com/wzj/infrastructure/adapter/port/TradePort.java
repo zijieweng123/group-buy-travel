@@ -57,9 +57,12 @@ public class TradePort implements ITradePort {
                 }
             }
             return NotifyTaskHTTPEnumVO.NULL.getCode();
-        } catch (Exception e) {
+        } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return NotifyTaskHTTPEnumVO.NULL.getCode();
+            return NotifyTaskHTTPEnumVO.ERROR.getCode();
+        } catch (Exception failure) {
+            // Ordinary delivery failures must not poison the pooled worker's interrupt flag.
+            return NotifyTaskHTTPEnumVO.ERROR.getCode();
         }
     }
 }

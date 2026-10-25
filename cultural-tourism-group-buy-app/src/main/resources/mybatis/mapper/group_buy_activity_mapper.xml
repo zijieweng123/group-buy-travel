@@ -50,4 +50,20 @@
         where activity_id = #{activityId}
     </select>
 
+    <resultMap id="lockPrecheckMap" type="com.wzj.infrastructure.dao.po.TradeLockPrecheck" extends="dataMap">
+        <result column="user_order_count" property="userOrderCount"/>
+        <result column="available_stock" property="availableStock"/>
+    </resultMap>
+
+    <select id="queryLockPrecheck" resultMap="lockPrecheckMap">
+        select a.activity_id, a.activity_name, a.discount_id, a.group_type, a.take_limit_count,
+               a.target, a.valid_time, a.status, a.start_time, a.end_time, a.tag_id, a.tag_scope,
+               (select count(o.id) from group_buy_order_list o
+                where o.user_id = #{userId} and o.activity_id = a.activity_id) as user_order_count,
+               i.available_stock
+        from group_buy_activity a
+        left join ticket_calendar_inventory i on i.activity_id = a.activity_id
+             and i.goods_id = #{goodsId} and i.travel_date = #{travelDate} and i.status = 1
+        where a.activity_id = #{activityId}
+    </select>
 </mapper>

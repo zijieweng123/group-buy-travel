@@ -27,7 +27,7 @@ public class GroupBuyNotifyJob {
     @Resource
     private RedissonClient redissonClient;
 
-    @Scheduled(cron = "0 0 0 * * ?")
+    @Scheduled(cron = "${trade.notify.retry-cron:*/10 * * * * ?}")
     public void exec() {
         // 独占锁 悲观锁
         // 在执行任务时，要抢占一个锁，谁抢占到谁就执行。

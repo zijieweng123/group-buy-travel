@@ -1,5 +1,7 @@
 package com.wzj.trigger.http;
 
+import com.wzj.types.observability.TradeRequestTiming;
+import com.wzj.types.observability.TradeRequestTiming.Stage;
 import com.alibaba.fastjson.JSON;
 import com.wzj.api.IMarketTradeService;
 import com.wzj.api.dto.LockMarketPayOrderRequestDTO;
@@ -86,7 +88,9 @@ public class MarketTradeController implements IMarketTradeService {
                                 .tradeOrderStatus(marketPayOrderEntity.getTradeOrderStatusEnumVO().getCode())
                                 .build();
 
-                log.info("交易锁单记录(存在):{} marketPayOrderEntity:{}", userId, JSON.toJSONString(marketPayOrderEntity));
+                if (log.isInfoEnabled()) {
+                    log.info("交易锁单记录(存在):{} marketPayOrderEntity:{}", userId, JSON.toJSONString(marketPayOrderEntity));
+                }
                 return Response.<LockMarketPayOrderResponseDTO>builder()
                         .code(ResponseCode.SUCCESS.getCode())
                         .info(ResponseCode.SUCCESS.getInfo())
@@ -107,13 +111,13 @@ public class MarketTradeController implements IMarketTradeService {
             }
 
             // 营销优惠试算
-            TrialBalanceEntity trialBalanceEntity = indexGroupBuyMarketService.indexMarketTrial(MarketProductEntity.builder()
+            TrialBalanceEntity trialBalanceEntity = TradeRequestTiming.call(Stage.MARKET, () -> indexGroupBuyMarketService.indexMarketTrial(MarketProductEntity.builder()
                     .userId(userId)
                     .source(source)
                     .channel(channel)
                     .goodsId(goodsId)
                     .activityId(activityId)
-                    .build());
+                    .build()));
 
 //            // 人群限定
 //            if (!trialBalanceEntity.getIsVisible() || !trialBalanceEntity.getIsEnable()){
@@ -161,7 +165,9 @@ public class MarketTradeController implements IMarketTradeService {
                                     )
                             .build());
 
-            log.info("交易锁单记录(新):{} marketPayOrderEntity:{}", userId, JSON.toJSONString(marketPayOrderEntity));
+            if (log.isInfoEnabled()) {
+                log.info("交易锁单记录(新):{} marketPayOrderEntity:{}", userId, JSON.toJSONString(marketPayOrderEntity));
+            }
 
             // 返回结果
             return Response.<LockMarketPayOrderResponseDTO>builder()
@@ -233,7 +239,9 @@ public class MarketTradeController implements IMarketTradeService {
                     .data(responseDTO)
                     .build();
 
-            log.info("营销交易组队结算完成:{} outTradeNo:{} response:{}", requestDTO.getUserId(), requestDTO.getOutTradeNo(), JSON.toJSONString(response));
+            if (log.isInfoEnabled()) {
+                log.info("营销交易组队结算完成:{} outTradeNo:{} response:{}", requestDTO.getUserId(), requestDTO.getOutTradeNo(), JSON.toJSONString(response));
+            }
 
             return response;
 

@@ -115,4 +115,23 @@
     </select>
 
 
+    <resultMap id="settlementReadMap" type="com.wzj.infrastructure.dao.po.TradeSettlementRead" extends="dataMap">
+        <result column="order_team_id" property="orderTeamId"/>
+        <result column="order_id" property="orderId"/>
+        <result column="order_original_price" property="orderOriginalPrice"/>
+        <result column="order_deduction_price" property="orderDeductionPrice"/>
+        <result column="order_pay_price" property="orderPayPrice"/>
+        <result column="order_status" property="orderStatus"/>
+    </resultMap>
+
+    <select id="querySettlementSnapshot" resultMap="settlementReadMap">
+        select o.team_id as order_team_id, o.order_id,
+               o.original_price as order_original_price, o.deduction_price as order_deduction_price,
+               o.pay_price as order_pay_price, o.status as order_status,
+               t.team_id, t.activity_id, t.target_count, t.complete_count, t.lock_count,
+               t.status, t.valid_start_time, t.valid_end_time, t.notify_type, t.notify_url
+        from group_buy_order_list o
+        left join group_buy_order t on t.team_id = o.team_id
+        where o.user_id = #{userId} and o.out_trade_no = #{outTradeNo} and o.status = 0
+    </select>
 </mapper>

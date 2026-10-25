@@ -3,10 +3,14 @@ package com.wzj.domain.trade.adapter.repository;
 import com.wzj.domain.trade.model.aggregate.GroupBuyOrderAggregate;
 import com.wzj.domain.trade.model.aggregate.GroupBuyTeamSettlementAggregate;
 import com.wzj.domain.trade.model.entity.GroupBuyActivityEntity;
+import com.wzj.domain.trade.model.entity.TradeLockPrecheckEntity;
+import com.wzj.domain.trade.model.entity.TradeLockRuleCommandEntity;
+import com.wzj.domain.trade.model.entity.TradeSettlementSnapshotEntity;
 import com.wzj.domain.trade.model.entity.GroupBuyTeamEntity;
 import com.wzj.domain.trade.model.entity.MarketPayOrderEntity;
 import com.wzj.domain.trade.model.entity.NotifyTaskEntity;
 import com.wzj.domain.trade.model.valobj.GroupBuyProgressVO;
+import com.wzj.domain.trade.model.valobj.InventoryReservationResult;
 
 import java.util.List;
 import java.time.LocalDate;
@@ -19,6 +23,11 @@ import java.time.LocalDate;
 public interface ITradeRepository {
 
     MarketPayOrderEntity queryMarketPayOrderEntityByOutTradeNo(String userId, String outTradeNo);
+
+    /** Null means the feature is disabled; a missing record is represented inside the snapshot. */
+    TradeLockPrecheckEntity queryLockPrecheck(TradeLockRuleCommandEntity request);
+
+    TradeSettlementSnapshotEntity querySettlementSnapshot(String userId, String outTradeNo);
 
     GroupBuyProgressVO queryGroupBuyProgress(String teamId);
 
@@ -48,11 +57,15 @@ public interface ITradeRepository {
 
     void recoveryTeamStock(String recoveryTeamStockKey, Integer validTime);
 
+    InventoryReservationResult reserveRequestAndCalendar(String requestKey, String calendarKey, Integer capacity, Integer validTime);
+
     boolean acquireRequestLock(String requestLockKey, Integer validTime);
 
     void releaseRequestLock(String requestLockKey);
 
     boolean occupyCalendarStock(String calendarStockKey, Long activityId, String goodsId, LocalDate travelDate);
+
+    boolean occupyCalendarStock(String calendarStockKey, Integer availableStock);
 
     void recoveryCalendarStock(String calendarStockKey);
 

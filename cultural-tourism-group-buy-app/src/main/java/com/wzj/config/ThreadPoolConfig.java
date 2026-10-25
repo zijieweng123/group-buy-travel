@@ -7,6 +7,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
+import io.micrometer.core.instrument.binder.MeterBinder;
+import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.scheduling.annotation.EnableAsync;
 
@@ -49,6 +53,11 @@ public class ThreadPoolConfig {
                 new LinkedBlockingQueue<>(properties.getBlockQueueSize()),
                 Executors.defaultThreadFactory(),
                 handler);
+    }
+
+    @Bean
+    public MeterBinder notifyExecutorMetrics(@Qualifier("notifyThreadPoolExecutor") ThreadPoolExecutor executor) {
+        return new ExecutorServiceMetrics(executor, "trade.notify", Collections.emptyList());
     }
 
     @Bean(name = "notifyThreadPoolExecutor", destroyMethod = "shutdown")

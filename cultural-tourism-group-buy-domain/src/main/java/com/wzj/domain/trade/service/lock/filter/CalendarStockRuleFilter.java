@@ -20,7 +20,12 @@ public class CalendarStockRuleFilter implements ILogicHandler<TradeLockRuleComma
     @Override
     public TradeLockRuleFilterBackEntity apply(TradeLockRuleCommandEntity request, TradeLockRuleFilterFactory.DynamicContext context) throws Exception {
         String key = context.generateCalendarStockKey(request.getActivityId(), request.getGoodsId(), request.getTravelDate());
-        if (!repository.occupyCalendarStock(key, request.getActivityId(), request.getGoodsId(), request.getTravelDate())) {
+        // The combined atomic reservation already owns this exact date's inventory.
+        if (key.equals(context.getOccupiedCalendarStockKey())) return next(request, context);
+        boolean occupied = context.getPrecheck() == null
+                ? repository.occupyCalendarStock(key, request.getActivityId(), request.getGoodsId(), request.getTravelDate())
+                : repository.occupyCalendarStock(key, context.getPrecheck().getAvailableStock());
+        if (!occupied) {
             throw new AppException(ResponseCode.E0108);
         }
         context.setOccupiedCalendarStockKey(key);

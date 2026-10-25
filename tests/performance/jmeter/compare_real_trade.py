@@ -35,6 +35,7 @@ def comparison_seed():
     extra = (rt.ROOT/'docs/dev-ops/mysql/sql/3-1-travel-ticket-extension.sql').read_text(encoding='utf-8')
     seed = base.replace('group_buy_market', COMPARE_DB)
     seed += '\nDELETE FROM notify_task;\nDELETE FROM group_buy_order_list;\nDELETE FROM group_buy_order;\nDELETE FROM crowd_tags_job;\n'
+    seed += '\nDROP TABLE IF EXISTS ticket_calendar_inventory;\n'
     seed += extra.replace('cultural_tourism_group_buy', COMPARE_DB)
     uses = set(re.findall(r'(?im)^\s*USE\s+\x60?([a-zA-Z0-9_]+)', seed))
     assert uses == {COMPARE_DB}, uses
@@ -81,7 +82,7 @@ def assert_owner():
         assert label == 'group-buy-perf', (name, label)
 
 
-def restore_seed(folder, version):
+def restore_seed(folder, version, with_indexes=None):
     assert_owner()
     rt.command([rt.DOCKER,'exec','-i','group-buy-perf-mysql','mysql','-uroot',
                 '-ploadtest-only','--default-character-set=utf8mb4'],data=comparison_seed(),timeout=60)
@@ -90,7 +91,8 @@ def restore_seed(folder, version):
     assert rt.rows('SELECT (SELECT COUNT(*) FROM group_buy_order_list),(SELECT COUNT(*) FROM notify_task)') == [['0','0']]
     # Only dedicated test Redis is cleared; run() first saves and verifies an RDB backup.
     rt.redis('FLUSHDB')
-    if version == 'optimized':
+    apply_indexes = with_indexes if with_indexes is not None else version == 'optimized'
+    if apply_indexes:
         rt.sql(INDEX_SQL.read_text(encoding='utf-8'))
     save(folder/'indexes.json', rt.rows("SELECT INDEX_NAME,GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) "
          "FROM information_schema.STATISTICS "
@@ -126,6 +128,44 @@ def mysql_delta(before, after):
     return sorted(result,key=lambda row:-row['totalMs'])
 
 
+
+def application_metrics():
+    import urllib.parse
+    import urllib.request
+    paths = {}
+    for operation in ('lock','settlement'):
+        for phase in ('begin','body','complete','total'):
+            query = urllib.parse.urlencode([('tag','operation:'+operation),('tag','phase:'+phase)])
+            paths[operation+'.'+phase] = 'trade.transaction.phase?'+query
+    for short,name in {
+        'pending':'pending','queued':'queued','coalesced':'coalesced','fallback':'fallback',
+        'batch.calls':'batch.calls','batch.rows':'batch.rows','batch.size':'batch.size',
+        'batch.failures':'batch.failures','deferred':'deferred','single.calls':'single.calls',
+        'confirmation.lag':'confirmation.lag'
+    }.items():
+        paths['notify.'+short] = 'trade.notify.status.'+name
+    result = {}
+    for key,path in paths.items():
+        with urllib.request.urlopen(rt.BASE+'/actuator/metrics/'+path,timeout=3) as response:
+            value = json.load(response)
+        result[key] = {m['statistic']:m['value'] for m in value['measurements']}
+    return result
+
+
+def mysql_io_snapshot():
+    # Dedicated test server only; global file waits include fixture/warm-up/load/reconciliation.
+    status = rt.rows("SHOW GLOBAL STATUS WHERE Variable_name IN "
+                    "('Innodb_data_fsyncs','Innodb_os_log_fsyncs','Innodb_log_waits',"
+                    "'Innodb_row_lock_time','Innodb_row_lock_waits','Innodb_log_write_requests',"
+                    "'Com_stmt_prepare','Com_stmt_execute','Com_stmt_close','Prepared_stmt_count')")
+    files = rt.rows("SELECT EVENT_NAME,COUNT_STAR,SUM_TIMER_WAIT,COUNT_READ,SUM_TIMER_READ,"
+                    "COUNT_WRITE,SUM_TIMER_WRITE,COUNT_MISC,SUM_TIMER_MISC "
+                    "FROM performance_schema.file_summary_by_event_name WHERE COUNT_STAR>0")
+    return {'status':{row[0]:int(row[1]) for row in status},
+            'files':{row[0]:dict(zip(('count','timePs','reads','readPs','writes','writePs','misc','miscPs'),map(int,row[1:])))
+                     for row in files}}
+
+
 def stop_application():
     if rt.app is not None and rt.app.poll() is None:
         try:
@@ -136,9 +176,9 @@ def stop_application():
     rt.stop_app()
 
 
-def start_phase(directory, version, jar, activity, topic):
+def start_phase(directory, version, jar, activity, topic, with_indexes=None, expected_pool=None, expected_notify_threads=None):
     rt.require_memory(1024)  # Containers already allocated; initial run requires 2048 MiB.
-    restore_seed(directory,version)
+    restore_seed(directory,version,with_indexes)
     rt.TEAM_SUCCESS_TOPIC = topic
     rt.command([rt.DOCKER,'exec','-e','KAFKA_HEAP_OPTS=-Xms16m -Xmx64m','group-buy-perf-kafka',
                 '/opt/kafka/bin/kafka-topics.sh','--bootstrap-server','kafka:19092','--create',
@@ -146,19 +186,34 @@ def start_phase(directory, version, jar, activity, topic):
     rt.start_app(directory,jar)
     result = rt.smoke(directory,activity)
     assert result['passed'], 'Transaction smoke failed'
+    if expected_pool is not None:
+        metadata = rt.http('/actuator/metrics/hikaricp.connections.max')
+        actual = {row['statistic']:row['value'] for row in metadata['measurements']}['VALUE']
+        save(directory/'pool-configuration.json',{'expectedMax':expected_pool,'actualMax':actual})
+        assert actual == expected_pool, 'Unexpected live Hikari capacity'
+    if expected_notify_threads is not None:
+        metadata=rt.http('/actuator/metrics/executor.pool.max?tag=name%3Atrade.notify')
+        actual={row['statistic']:row['value'] for row in metadata['measurements']}['VALUE']
+        save(directory/'notify-pool-configuration.json',{'expectedMax':expected_notify_threads,'actualMax':actual})
+        assert actual==expected_notify_threads, 'Unexpected live notification pool capacity'
     return result
 
 
 def write_report(folder, report):
     lines=['# Real group-buy optimization comparison','','State: '+report['state'],'',
-           '50 trade users; 60 seconds per run, first 15 seconds warm-up; alternating versions, three runs each.',
-           'Real orders, settlement, inventory and Kafka consumption markers; payment callbacks are test-generated.','',
+           (str(len(report.get('manifest',{}).get('order',[])))+' validation run(s); 50 users; 60 seconds per run, first 15 seconds warm-up.'
+            if report.get('manifest',{}).get('diagnosisOnly') else
+            '50 trade users; 60 seconds per run, first 15 seconds warm-up; alternating versions, three runs each.'),
+           'Real orders, settlement, inventory and Kafka consumption markers; payment callbacks are test-generated.',
+           'Comparison kind: '+report.get('manifest',{}).get('comparisonKind','archived-builds'),'',
            '| Sequence | Version | Order success/s | Order P95 ms | Failures | Data gates |',
            '| --- | --- | ---: | ---: | ---: | --- |']
     for index,run in enumerate(report.get('runs',[]),1):
         lines.append(f"| {index} | {run['version']} | {run['order']['successTps']} | {run['order']['p95Ms']} | {run['allHttpFailures']} | {run['verification']['passed']} |")
     if report.get('comparison'):
         lines += ['',json.dumps(report['comparison'],ensure_ascii=False,indent=2)]
+    if report.get('validation'):
+        lines += ['',json.dumps(report['validation'],ensure_ascii=False,indent=2)]
     if report.get('error'):
         lines += ['','Error: '+report['error']]
     lines += ['','Each run restores the dedicated comparison database, clears dedicated test Redis after an RDB backup, and uses a new topic.',
@@ -174,7 +229,7 @@ def run(folder, manifest):
     directory.mkdir()
     report = {'state':'running','startedAt':datetime.now().astimezone().isoformat(),
               'manifest':manifest,'runs':[]}
-    rt.APP_EXTRA_ARGUMENTS = ['--management.endpoints.web.exposure.include=health,metrics,shutdown',
+    common_arguments = ['--management.endpoints.web.exposure.include=health,metrics,shutdown',
                              '--management.endpoint.shutdown.enabled=true',
                              '--spring.kafka.consumer.properties.session.timeout.ms=10000',
                              '--spring.kafka.consumer.properties.heartbeat.interval.ms=2000']
@@ -191,27 +246,50 @@ def run(folder, manifest):
         report['redisBackupSha256'] = digest(backup)
         report['durabilityAndPool'] = rt.rows('SELECT @@innodb_flush_log_at_trx_commit,@@sync_binlog,@@innodb_buffer_pool_size,@@max_connections')
         from check_consistency import run_checks
-        for index,version in enumerate(('baseline','optimized')):
+        for index,version in enumerate(manifest.get('preflightVersions',('baseline','optimized'))):
             target = directory/('preflight-'+version)
             target.mkdir()
             activity = 600000000+int(token)*100+index*10
-            start_phase(target,version,Path(manifest[version+'Jar']),activity,'travel.cmp.'+token+'.c'+str(index))
-            checks = run_checks(target,activity+1)
+            rt.APP_EXTRA_ARGUMENTS = common_arguments + manifest.get('versionArguments',{}).get(version,[])
+            start_phase(target,version,Path(manifest[version+'Jar']),activity,'travel.cmp.'+token+'.c'+str(index),
+                        True if manifest.get('indexesForBoth') else None, manifest.get('expectedPool',{}).get(version), manifest.get('expectedNotifyThreads',{}).get(version))
+            checks = run_checks(target,activity+1,include_notify_recovery=manifest.get('observeTradeMetrics',False),
+                                include_trade_reads=manifest.get('observeReadSnapshots',False))
             assert checks['passed'], 'Correctness preflight failed: '+version
             report[version+'Correctness'] = checks
             stop_application()
         for index,version in enumerate(manifest['order'],1):
-            print(f'Comparison {index}/6: {version}',flush=True)
+            print(f"Comparison {index}/{len(manifest['order'])}: {version}",flush=True)
             target = directory/(str(index)+'-'+version)
             target.mkdir()
             activity = 700000000+int(token)*100+index*10
-            start_phase(target,version,Path(manifest[version+'Jar']),activity,'travel.cmp.'+token+'.r'+str(index))
+            rt.APP_EXTRA_ARGUMENTS = common_arguments + manifest.get('versionArguments',{}).get(version,[])
+            start_phase(target,version,Path(manifest[version+'Jar']),activity,'travel.cmp.'+token+'.r'+str(index),
+                        True if manifest.get('indexesForBoth') else None, manifest.get('expectedPool',{}).get(version), manifest.get('expectedNotifyThreads',{}).get(version))
             before = mysql_snapshot()
+            metrics_before = application_metrics() if manifest.get('observeTradeMetrics') else None
+            io_before = mysql_io_snapshot() if manifest.get('observeTradeMetrics') else None
             rt.fixture(activity+1)
             result = rt.jmeter_run(target/'load',activity+1,50,60,15,index)
+            if manifest.get('observeRequestTimings'):
+                from request_latency import analyze
+                result['requestTimings'] = analyze(target/'load')
             result['version'] = version
             result['jarSha256'] = digest(Path(manifest[version+'Jar']))
             result['mysqlDelta'] = mysql_delta(before,mysql_snapshot())
+            if metrics_before is not None:
+                result['tradeMetrics'] = {'before':metrics_before,'after':application_metrics()}
+                result['mysqlIo'] = {'before':io_before,'after':mysql_io_snapshot()}
+                assert result['tradeMetrics']['after']['notify.pending'].get('VALUE') == 0, 'Pending status writes after reconciliation'
+                if version in manifest.get('preparedStatements',{}):
+                    io=result['mysqlIo'];before_status=io['before']['status'];after_status=io['after']['status']
+                    executions=after_status.get('Com_stmt_execute',0)-before_status.get('Com_stmt_execute',0)
+                    preparations=after_status.get('Com_stmt_prepare',0)-before_status.get('Com_stmt_prepare',0)
+                    expected=manifest['preparedStatements'][version]
+                    result['preparedStatements']={'enabled':expected,'executions':executions,'preparations':preparations,
+                                                  'openStatements':after_status.get('Prepared_stmt_count',0)}
+                    assert (executions>0)==expected, 'Server prepared statement configuration did not take effect'
+                    if expected: assert executions>2*preparations, 'Prepared statements were not reused'
             record = rt.rows(f"SELECT team_id,user_id,out_trade_no FROM group_buy_order_list WHERE activity_id={activity+1} LIMIT 1")
             assert len(record)==1
             team,user,external = record[0]
@@ -220,21 +298,43 @@ def run(folder, manifest):
                 'team-members':rt.rows(f"EXPLAIN SELECT out_trade_no FROM group_buy_order_list WHERE team_id='{team}' AND status=1"),
                 'external-order':rt.rows(f"EXPLAIN SELECT order_id FROM group_buy_order_list WHERE user_id='{user}' AND out_trade_no='{external}' AND status=0")
             })
+            if manifest.get('observeReadSnapshots'):
+                import xml.etree.ElementTree as ET
+                plans = {}
+                parameters = {'userId':"'"+user+"'",'outTradeNo':"'"+external+"'",'activityId':str(activity+1),
+                              'goodsId':"'9890001'",'travelDate':"'"+rt.TRAVEL_DATE+"'"}
+                for filename,statement in [('group_buy_activity_mapper.xml','queryLockPrecheck'),
+                                            ('group_buy_order_mapper.xml','querySettlementSnapshot')]:
+                    mapper = ET.parse(rt.ROOT/'cultural-tourism-group-buy-app/src/main/resources/mybatis/mapper'/filename).getroot()
+                    node = mapper.find("select[@id='"+statement+"']")
+                    assert node is not None and len(node)==0
+                    query = node.text
+                    for name,value in parameters.items(): query = query.replace('#{'+name+'}',value)
+                    assert '#{' not in query
+                    plans[statement] = rt.rows('EXPLAIN '+query)
+                save(target/'read-query-explain.json',plans)
             save(target/'comparison-summary.json',result)
             report['runs'].append(result)
             save(directory/'status.json',report)
             print(json.dumps({k:result[k] for k in ('version','order','allHttpFailures','passed')},ensure_ascii=False),flush=True)
             assert result['passed'], 'Business or data gates failed'
             stop_application()
-        comparison = {}
-        for version in ('baseline','optimized'):
-            selected = [r for r in report['runs'] if r['version']==version]
-            assert len(selected)==3 and all(r['passed'] for r in selected)
-            comparison[version] = {key:statistics.median(r['order'][key] for r in selected)
-                                   for key in ('successTps','p95Ms','p99Ms')}
-        comparison['throughputIncreasePercent'] = round((comparison['optimized']['successTps']/comparison['baseline']['successTps']-1)*100,2)
-        comparison['p95ReductionPercent'] = round((1-comparison['optimized']['p95Ms']/comparison['baseline']['p95Ms'])*100,2)
-        report['comparison'] = comparison
+        if not manifest.get('diagnosisOnly'):
+            comparison = {}
+            for version in ('baseline','optimized'):
+                selected = [r for r in report['runs'] if r['version']==version]
+                assert len(selected)==3 and all(r['passed'] for r in selected)
+                comparison[version] = {key:statistics.median(r['order'][key] for r in selected)
+                                       for key in ('successTps','p95Ms','p99Ms')}
+            comparison['throughputIncreasePercent'] = round((comparison['optimized']['successTps']/comparison['baseline']['successTps']-1)*100,2)
+            comparison['p95ReductionPercent'] = round((1-comparison['optimized']['p95Ms']/comparison['baseline']['p95Ms'])*100,2)
+            report['comparison'] = comparison
+        elif manifest.get('verificationOnly'):
+            assert len(report['runs'])==3 and all(run['passed'] for run in report['runs'])
+            report['validation']={op:{key:statistics.median(run[op][key] for run in report['runs'])
+                                     for key in ('successTps','p95Ms','p99Ms')} for op in ('order','settlement')}
+            report['validation']['qps100Reached']=report['validation']['order']['successTps']>=100
+            report['validation']['orderP95Below500']=report['validation']['order']['p95Ms']<500
         report['state'] = 'completed'
     except Exception as failure:
         report['state'] = 'failed'

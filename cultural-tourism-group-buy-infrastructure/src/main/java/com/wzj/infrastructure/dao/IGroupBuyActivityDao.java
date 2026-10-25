@@ -3,6 +3,8 @@ package com.wzj.infrastructure.dao;
 import com.wzj.domain.trade.model.entity.GroupBuyActivityEntity;
 import com.wzj.infrastructure.dao.po.GroupBuyActivity;
 import org.apache.ibatis.annotations.Mapper;
+import com.wzj.domain.trade.model.entity.TradeLockRuleCommandEntity;
+import com.wzj.infrastructure.dao.po.TradeLockPrecheck;
 
 import java.util.List;
 
@@ -12,6 +14,8 @@ import java.util.List;
  */
 @Mapper
 public interface IGroupBuyActivityDao {
+
+    TradeLockPrecheck queryLockPrecheck(TradeLockRuleCommandEntity request);
 
     List<GroupBuyActivity> queryGroupBuyActivityList();
 

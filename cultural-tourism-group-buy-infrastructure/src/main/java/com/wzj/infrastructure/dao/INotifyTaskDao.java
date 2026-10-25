@@ -2,6 +2,7 @@ package com.wzj.infrastructure.dao;
 
 import com.wzj.infrastructure.dao.po.NotifyTask;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -21,6 +22,8 @@ public interface INotifyTaskDao {
     NotifyTask queryUnExecutedNotifyTaskByTeamId(String teamId);
 
     int updateNotifyTaskStatusSuccess(String teamId);
+
+    int updateNotifyTaskStatusSuccessBatch(@Param("teamIds") List<String> teamIds);
 
     int updateNotifyTaskStatusError(String teamId);
 
